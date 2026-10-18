@@ -78,6 +78,7 @@ type seriesResult struct {
 	delay       int     // that alarm's index minus tau
 	covered     bool    // SinceLow <= tau <= SinceHigh on the alarm sample
 	sinceBias   float64 // Since - tau on the alarm sample
+	repeats     int     // alarms after the first one at or after tau
 }
 
 func runRegime(c bankCase, vs []float64, plain bool) seriesResult {
@@ -97,6 +98,9 @@ func runRegime(c bankCase, vs []float64, plain bool) seriesResult {
 		if c.id == 1 || i < bankTau {
 			res.falseAlarms++
 			continue
+		}
+		if !first {
+			res.repeats++
 		}
 		if first {
 			first = false
@@ -158,6 +162,7 @@ type caseSummary struct {
 	coverage    float64 // fraction of detected cases covered
 	sinceBias   float64 // median Since - tau among detected
 	censoredMed float64 // median delay, undetected counted as horizon + 1
+	repeated    float64 // fraction of series with a second alarm after tau
 }
 
 func summarize(c bankCase, rs []seriesResult, bound int) caseSummary {
@@ -166,6 +171,9 @@ func summarize(c bankCase, rs []seriesResult, bound int) caseSummary {
 	var delays, biases, cens []float64
 	for _, r := range rs {
 		fa += r.falseAlarms
+		if r.repeats > 0 {
+			s.repeated++
+		}
 		if r.detected {
 			det++
 			delays = append(delays, float64(r.delay))
@@ -183,6 +191,7 @@ func summarize(c bankCase, rs []seriesResult, bound int) caseSummary {
 	}
 	samples := len(rs) * c.n
 	s.faPer1000 = 1000 * float64(fa) / float64(samples)
+	s.repeated /= float64(len(rs))
 	s.detected = float64(det) / float64(len(rs))
 	s.within = float64(within) / float64(len(rs))
 	s.median = medianOf(delays)
@@ -277,6 +286,8 @@ func TestBank(t *testing.T) {
 	}
 	pf("| %s | empirical | %.3f | %.1f%% | | %.1f | %.1f%% | %.1f |\n\n", caseHalf.name,
 		halfSum.faPer1000, 100*halfSum.detected, halfSum.median, 100*halfSum.coverage, halfSum.sinceBias)
+	pf("Series with a second alarm after the change (not sealed): C2 %.1f%%, C3 %.1f%%, C4 %.1f%%, 0.5 sigma %.1f%%\n\n",
+		100*e[2].repeated, 100*e[3].repeated, 100*e[4].repeated, 100*halfSum.repeated)
 
 	// C6: CUSUM threshold matched to the measured C1 rate of regime. With a
 	// rate of 0, take the smallest threshold with no false alarm on C1.

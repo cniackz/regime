@@ -134,9 +134,8 @@ func WithWindow(w int) Option { return func(c *config) { c.window = w } }
 // units, with no alarm and ChangeProb 0. It must be in [2, 65536]. Default 30.
 func WithBurnIn(n int) Option { return func(c *config) { c.burnIn = n } }
 
-// WithMinRun sets the debounce, in samples: after an alarm, no new alarm until
-// the most probable regime has lasted this long. It must be in [1, 65536].
-// Default 10.
+// WithMinRun sets the debounce, in samples: two alarms are always at least
+// this many samples apart. It must be in [1, 65536]. Default 10.
 func WithMinRun(m int) Option { return func(c *config) { c.minRun = m } }
 
 // run is one run-length hypothesis: a regime that started at startT.
@@ -247,8 +246,8 @@ type Report struct {
 	// ChangeProb is the posterior probability that the current regime started
 	// within the last Window samples. It is 0 during burn-in.
 	ChangeProb float64
-	// Alarm is true on exactly one sample per detected change, and never
-	// during burn-in.
+	// Alarm is true on the sample where a change is detected. Two alarms are
+	// at least MinRun samples apart, and there is none during burn-in.
 	Alarm bool
 	// RunLength is the length, in samples, of the most probable current
 	// regime.
@@ -285,6 +284,7 @@ type Detector struct {
 	runs, next []run // run hypotheses, oldest first; next is scratch, len 0 when idle
 
 	armed        bool
+	lastAlarm    int // N of the last alarm, for the debounce
 	logH, log1mH float64
 
 	// lgc[n] caches lgammaRatio for a run that has absorbed n samples, whose
@@ -352,6 +352,7 @@ func (d *Detector) Reset() {
 	d.runs = d.runs[:0]
 	d.next = d.next[:0]
 	d.armed = true
+	d.lastAlarm = 0
 }
 
 // Clone returns an independent copy of the detector.
@@ -533,10 +534,15 @@ func (d *Detector) step(t, v float64) (Report, error) {
 
 	cp := d.changeProb()
 	alarm := false
+	// Debounce: after an alarm, re-arm only once MinRun samples have passed
+	// since it and ChangeProb has fallen below the threshold. Counting from
+	// the alarm, not from the most probable regime, matters: right after an
+	// alarm the most probable hypothesis can flip back to an old, long regime.
 	if d.armed && cp >= d.cfg.threshold {
 		alarm = true
 		d.armed = false
-	} else if !d.armed && cp < d.cfg.threshold && d.runs[d.mapIndex()].n >= d.cfg.minRun {
+		d.lastAlarm = d.n
+	} else if !d.armed && cp < d.cfg.threshold && d.n-d.lastAlarm >= d.cfg.minRun {
 		d.armed = true
 	}
 	return d.report(cp, alarm), nil

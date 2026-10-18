@@ -94,9 +94,12 @@
 // # Burn-in and debounce
 //
 // BurnIn (default 30) is the burn-in length: no alarm and ChangeProb 0 before
-// BurnIn samples. MinRun (default 10) is the debounce: after an alarm, no new
-// alarm until the most probable regime has lasted MinRun samples, so one
-// planted change makes at most one alarm.
+// BurnIn samples. MinRun (default 10) is the debounce: after an alarm, the
+// detector re-arms only once MinRun samples have passed and ChangeProb has
+// fallen below the threshold, so two alarms are at least MinRun samples
+// apart. A single change can still raise a second alarm later than that, when
+// the posterior first explains it one way (for example as a bend) and then
+// another; the README measures how often.
 //
 // # Cost
 //

@@ -177,3 +177,90 @@ func TestSinceQuantiles(t *testing.T) {
 		t.Fatalf("since %v [%v, %v], want 30 [10, 30]", rep.Since, rep.SinceLow, rep.SinceHigh)
 	}
 }
+
+// TestAlarmsAtLeastMinRunApart sweeps seeds over a single 4 sigma jump, the
+// case where the most probable hypothesis can flip back to the old regime
+// right after an alarm (seed 33 used to alarm at 300, 320 and 323).
+func TestAlarmsAtLeastMinRunApart(t *testing.T) {
+	for _, minRun := range []int{3, DefaultMinRun, 25} {
+		for seed := uint64(0); seed < 300; seed++ {
+			vs := noisy(1000+seed, 600, func(i int) float64 {
+				if i >= 300 {
+					return 4
+				}
+				return 0
+			})
+			d, _ := New(WithMinRun(minRun))
+			last := -1
+			for i, v := range vs {
+				r, _ := d.Observe(float64(i), v)
+				if !r.Alarm {
+					continue
+				}
+				if last >= 0 && i-last < minRun {
+					t.Fatalf("MinRun %d, seed %d: alarms at %d and %d", minRun, seed, last, i)
+				}
+				last = i
+			}
+		}
+	}
+}
+
+// TestRangeBoundary pins maxStd: a standardized value just over 1e100 is
+// rejected and one just under is accepted.
+func TestRangeBoundary(t *testing.T) {
+	d, _ := New(WithBurnIn(4))
+	for i, v := range []float64{-1, 1, -1, 1} {
+		d.Observe(float64(i), v)
+	}
+	// Location 0, scale 1.4826 (MAD of +-1).
+	if _, err := d.Observe(10, 1.4826*2e100); !errors.Is(err, ErrRange) {
+		t.Fatalf("2e100 scales: err = %v, want ErrRange", err)
+	}
+	if _, err := d.Observe(11, 1.4826*0.5e100); err != nil {
+		t.Fatalf("0.5e100 scales: err = %v, want nil", err)
+	}
+	if _, err := d.Observe(2e100, 0); !errors.Is(err, ErrRange) {
+		t.Fatalf("time 2e100: err = %v, want ErrRange", err)
+	}
+}
+
+// TestPruneThreshold pins pruneLog at 1e-12 of the most probable hypothesis.
+func TestPruneThreshold(t *testing.T) {
+	rs := []run{{startT: 1, logp: 0}, {startT: 2, logp: math.Log(1e-11)}, {startT: 3, logp: math.Log(1e-13)}}
+	rs = prune(rs, 10)
+	if len(rs) != 2 || rs[1].startT != 2 {
+		t.Fatalf("kept %+v, want the 1e-11 hypothesis and not the 1e-13 one", rs)
+	}
+}
+
+// The clamps below only act when rounding has pushed V off positive
+// semidefinite. These tests poison V directly to pin each one.
+func TestClampsOnIndefiniteV(t *testing.T) {
+	r := newRun(Trend, 0, 0, 0)
+	r.v = [2][2]float64{{-2, 0}, {0, 0}}
+	if _, s2, _ := r.predict([2]float64{1, 0}); !(s2 > 0) {
+		t.Fatalf("predict scale2 = %v with indefinite V, want > 0", s2)
+	}
+	b := r.beta
+	r.update([2]float64{1, 0}, 3)
+	if !(r.beta >= b) || r.v[0][0] < 0 {
+		t.Fatalf("update with indefinite V: beta %v (was %v), V00 %v", r.beta, b, r.v[0][0])
+	}
+	r = newRun(Trend, 0, 0, 0)
+	r.v = [2][2]float64{{0, 0}, {0, -2}}
+	r.update([2]float64{1, 1}, 3)
+	if r.v[1][1] < 0 {
+		t.Fatalf("V11 = %v after update, want >= 0", r.v[1][1])
+	}
+
+	d, _ := New(WithBurnIn(3))
+	for i := range 3 {
+		d.Observe(float64(i), 5+float64(i%2))
+	}
+	d.runs[0].v[1][1] = -1
+	rep := d.report(0, false)
+	if rep.SlopeStd != 0 || rep.Level == 0 {
+		t.Fatalf("report with negative V11: SlopeStd %v, Level %v; want 0 and the level kept", rep.SlopeStd, rep.Level)
+	}
+}

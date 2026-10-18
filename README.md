@@ -77,8 +77,8 @@ came out, failures included.
 
 ## Measured results
 
-First run of the bank, on the code at commit `1f6ac5c`, with the sealed
-defaults and seed `20261018`. Reproduce with
+Bank run 2, on the code that fixed the debounce (see "Changes after the
+attack" below), with the sealed defaults and seed `20261018`. Reproduce with
 `REGIME_BANK=1 go test -run TestBank -v .` (about 30 seconds on a laptop).
 Noise sigma is 1, the change is at sample 300, and a detection must come
 within 50 samples. "Plain" replaces the empirical center of a new level with
@@ -86,17 +86,19 @@ the burn-in location.
 
 | Case | Prior | False alarms / 1000 samples | Detected | Within bound | Median delay | Coverage | Median Since - tau |
 |---|---|---|---|---|---|---|---|
-| C1 no change | empirical | 0.437 | 0.0% | 0.0% | n/a | n/a | n/a |
-| C1 no change | plain | 0.442 | 0.0% | 0.0% | n/a | n/a | n/a |
-| C2 shift 2 sigma | empirical | 0.268 | 90.8% | 90.8% | 3.0 | 97.8% | 0.0 |
-| C2 shift 2 sigma | plain | 0.270 | 90.9% | 90.9% | 3.0 | 97.7% | 0.0 |
-| C3 shift 4 sigma | empirical | 0.212 | 100.0% | 100.0% | 0.0 | 99.2% | 0.0 |
-| C3 shift 4 sigma | plain | 0.217 | 100.0% | 100.0% | 0.0 | 99.2% | 0.0 |
-| C4 bend 0.1 sigma/sample | empirical | 0.298 | 53.9% | 53.6% | 16.0 | 93.1% | 12.0 |
-| C4 bend 0.1 sigma/sample | plain | 0.300 | 53.9% | 53.6% | 16.0 | 93.5% | 12.0 |
-| C6 shift 0.5 sigma | empirical | 0.277 | 7.3% | | 14.0 | 95.9% | 4.0 |
+| C1 no change | empirical | 0.416 | 0.0% | 0.0% | n/a | n/a | n/a |
+| C1 no change | plain | 0.420 | 0.0% | 0.0% | n/a | n/a | n/a |
+| C2 shift 2 sigma | empirical | 0.255 | 90.4% | 90.4% | 3.0 | 98.0% | 0.0 |
+| C2 shift 2 sigma | plain | 0.257 | 90.5% | 90.5% | 3.0 | 97.9% | 0.0 |
+| C3 shift 4 sigma | empirical | 0.203 | 99.8% | 99.6% | 0.0 | 99.2% | 0.0 |
+| C3 shift 4 sigma | plain | 0.208 | 99.8% | 99.6% | 0.0 | 99.2% | 0.0 |
+| C4 bend 0.1 sigma/sample | empirical | 0.275 | 53.9% | 53.6% | 16.0 | 93.1% | 12.0 |
+| C4 bend 0.1 sigma/sample | plain | 0.275 | 53.9% | 53.6% | 16.0 | 93.5% | 12.0 |
+| C6 shift 0.5 sigma | empirical | 0.253 | 7.3% | | 14.0 | 95.9% | 4.0 |
 
-CUSUM (k = 1, true pre-change mean and sigma given), h = 3.406, C1 rate 0.437 / 1000 (regime 0.437)
+Series with a second alarm after the change (not sealed): C2 14.4%, C3 16.5%, C4 7.8%, 0.5 sigma 1.3%
+
+CUSUM (k = 1, true pre-change mean and sigma given), h = 3.425, C1 rate 0.416 / 1000 (regime 0.416)
 
 | Shift | regime censored median delay | CUSUM censored median delay |
 |---|---|---|
@@ -106,20 +108,41 @@ CUSUM (k = 1, true pre-change mean and sigma given), h = 3.406, C1 rate 0.437 / 
 
 ### Sealed claims
 
-1. C1 <= 1 false alarm / 1000: 0.437, PASS
-2. C2 >= 95% detected and median delay <= 6.9: 90.8%, 3.0, FAIL
-3. C3 >= 99% within 5: 100.0%, PASS
+1. C1 <= 1 false alarm / 1000: 0.416, PASS
+2. C2 >= 95% detected and median delay <= 6.9: 90.4%, 3.0, FAIL
+3. C3 >= 99% within 5: 99.6%, PASS
 4. C4 >= 90% within 30: 53.6%, FAIL
-5. coverage in [80%, 98%]: C2 97.8%, C3 99.2%, C4 93.1%, FAIL
+5. coverage in [80%, 98%]: C2 98.0%, C3 99.2%, C4 93.1%, FAIL
 6. CUSUM faster at 2 sigma (3.0 vs 3.0), regime faster at 0.5 (51.0 vs 51.0) and 4 sigma (0.0 vs 1.0): FAIL
-7. empirical C1 rate >= plain: 0.437 vs 0.442, FAIL
+7. empirical C1 rate >= plain: 0.416 vs 0.420, FAIL
 8. C1 rates within a factor of 2: ratio 0.99, PASS
 9. |median Since bias| <= 3, both priors: empirical 0.0/0.0/12.0, plain 0.0/0.0/12.0, FAIL
 10. Original check: empirical prior moves coverage by < 10 points: max 0.4 points, PASS
 
+### Changes after the attack
+
+A non-author attack found that the debounce counted from the most probable
+regime, which can flip back to the old regime right after an alarm, so two
+alarms could come 2 or 3 samples apart. The debounce now counts from the last
+alarm. Bank run 1 (code at `1f6ac5c`) against run 2:
+
+| Number | Run 1 | Run 2 |
+|---|---|---|
+| C1 false alarms / 1000 (claim 1) | 0.437 | 0.416 |
+| C2 detected (claim 2) | 90.8% | 90.4% |
+| C3 within 5 samples (claim 3) | 100.0% | 99.6% |
+| C2 interval coverage (claim 5) | 97.8% | 98.0% |
+| C1 empirical vs plain (claim 7) | 0.437 vs 0.442 | 0.416 vs 0.420 |
+| Series with a second alarm after a 2 sigma change | 27.1% | 14.4% |
+
+No claim changed verdict. C2 and C3 lose a few detections because a false
+alarm just before the change now holds the debounce for `MinRun` samples. Most
+second alarms that remain are ordinary false alarms in the 300 samples after
+the change (about 0.4 per 1000 samples).
+
 ### What the failures say
 
-- **Claims 2 and 4 (missed detections).** About 9% of 2 sigma shifts and 46%
+- **Claims 2 and 4 (missed detections).** About 10% of 2 sigma shifts and 46%
   of the slow bends are missed. In the missed shifts inspected, the `Trend`
   model explains the recent jump as a bend that started a little earlier: the
   posterior puts the start of the new regime 10 to 20 samples back, older than
@@ -134,8 +157,8 @@ CUSUM (k = 1, true pre-change mean and sigma given), h = 3.406, C1 rate 0.437 / 
   mean and sigma, ties `regime` at 2 sigma; `regime` is faster at 4 sigma, and
   neither detects most 0.5 sigma shifts within 50 samples.
 - **Claims 7 and 8.** The empirical center did not raise the false-alarm
-  rate, so the predicted direction was wrong, but the effect is tiny: the two
-  priors are within 3% of each other on every row.
+  rate, so the predicted direction was wrong (0.416 against 0.420), but the
+  effect is tiny: the two priors are within 3% of each other on every row.
 - **Claim 9.** For bends, `Since` lands about 12 samples after the true start,
   because a bend with no jump becomes visible only as its effect accumulates.
 
@@ -151,15 +174,15 @@ Offline upper bound, PELT (Killick, Fearnhead and Eckley 2012), penalty p*log(n)
 | Case | Method | Change found within 5 samples of tau | Median abs error of the start | Spurious changes / 1000 samples |
 |---|---|---|---|---|
 | C1 no change | PELT, offline | n/a | n/a | 0.022 |
-| C1 no change | regime, online | n/a | n/a | 0.437 |
+| C1 no change | regime, online | n/a | n/a | 0.416 |
 | C2 shift 2 sigma | PELT, offline | 99.2% | 0.0 | 0.043 |
-| C2 shift 2 sigma | regime, online | 67.2% | 1.0 | 0.830 |
+| C2 shift 2 sigma | regime, online | 66.8% | 1.0 | 0.533 |
 | C3 shift 4 sigma | PELT, offline | 100.0% | 0.0 | 0.037 |
-| C3 shift 4 sigma | regime, online | 95.7% | 0.0 | 0.562 |
+| C3 shift 4 sigma | regime, online | 95.7% | 0.0 | 0.507 |
 | C4 bend 0.1 sigma/sample | PELT, offline | 37.4% | 7.0 | 0.012 |
-| C4 bend 0.1 sigma/sample | regime, online | 2.6% | 15.0 | 0.673 |
+| C4 bend 0.1 sigma/sample | regime, online | 2.6% | 15.0 | 0.503 |
 | C6 shift 0.5 sigma | PELT, offline | 45.0% | 6.0 | 0.147 |
-| C6 shift 0.5 sigma | regime, online | 1.3% | 33.0 | 0.478 |
+| C6 shift 0.5 sigma | regime, online | 1.3% | 33.0 | 0.438 |
 
 regime counts as spurious any alarm other than the first one within the horizon after tau.
 
@@ -176,10 +199,13 @@ is wide. `Observe` does not allocate.
 
 ## Testing
 
-Unit and property tests (posterior mass sums to 1, affine invariance, one
-alarm per change, rejected samples leave the state unchanged, finite reports),
-fuzzing of `New` and `Observe`, examples, `-race`, and mutation testing with
-`python3 scripts/mutants.py`: 24 of 24 mutants killed (`MUTANTS.md`).
+Unit and property tests (posterior mass sums to 1, affine invariance, alarms
+at least `MinRun` samples apart over 300 seeds, rejected samples leave the
+state unchanged, finite reports), fuzzing of `New` and `Observe`, examples,
+`-race`, and mutation testing with `python3 scripts/mutants.py`: 33 of 33
+mutants killed, with none declared equivalent (`MUTANTS.md`). The list
+includes the mutants the non-author attack found that the first list missed:
+`maxStd`, `pruneLog` and the five `max(., 0)` clamps.
 
 ## Known limits
 
@@ -189,17 +215,17 @@ Measured on the bank (see "Measured results"):
   0.1 sigma per sample are detected within 30 samples, against a sealed target
   of 90% (claim 4). Offline PELT locates 37.4% of them within 5 samples, so the
   case is hard, but `regime` trails it.
-- **Some 2 sigma shifts are missed:** 90.8% detected within 50 samples, against
+- **Some 2 sigma shifts are missed:** 90.4% detected within 50 samples, against
   a sealed 95% (claim 2). The median delay of those found, 3.0 samples, is
   within the sealed bound of 6.9.
 - **The start interval is too wide for large jumps:** the 90% interval holds the
   true start in 99.2% of 4 sigma shifts, above the sealed band of 80% to 98%
-  (claim 5). It is in the band at 2 sigma (97.8%) and for bends (93.1%).
+  (claim 5). It is in the band at 2 sigma (98.0%) and for bends (93.1%).
 - **`Since` is late for bends:** it lands a median of 12 samples after the true
   start of a bend, against a sealed bound of 3 (claim 9). For shifts the median
   error is 0.
-- **The empirical prior has almost no effect on false alarms:** 0.437 against
-  0.442 per 1000 samples with the plain prior. The sealed hypothesis that it
+- **The empirical prior has almost no effect on false alarms:** 0.416 against
+  0.420 per 1000 samples with the plain prior. The sealed hypothesis that it
   would raise the rate (claim 7) was false.
 
 By design:
