@@ -133,7 +133,13 @@ alarm. Bank run 1 (code at `1f6ac5c`) against run 2:
 | C3 within 5 samples (claim 3) | 100.0% | 99.6% |
 | C2 interval coverage (claim 5) | 97.8% | 98.0% |
 | C1 empirical vs plain (claim 7) | 0.437 vs 0.442 | 0.416 vs 0.420 |
-| Series with a second alarm after a 2 sigma change | 27.1% | 14.4% |
+| Series with a second alarm after a 2 sigma change (not sealed) | 27.1% (recomputed) | 14.4% |
+
+The second-alarm metric did not exist in run 1. Its run 1 value was recomputed
+afterwards with the old detector (`regime.go` of `1f6ac5c`) and the bank of
+`219a805`: `git checkout 1f6ac5c -- regime.go && REGIME_BANK=1 go test -run
+'TestBank$' -v .`. The output is kept with the run 1 results, marked as not
+sealed.
 
 No claim changed verdict. C2 and C3 lose a few detections because a false
 alarm just before the change now holds the debounce for `MinRun` samples. Most
@@ -220,7 +226,12 @@ Measured on the bank (see "Measured results"):
   within the sealed bound of 6.9.
 - **The start interval is too wide for large jumps:** the 90% interval holds the
   true start in 99.2% of 4 sigma shifts, above the sealed band of 80% to 98%
-  (claim 5). It is in the band at 2 sigma (98.0%) and for bends (93.1%).
+  (claim 5). For bends it holds 93.1%, inside the band. At 2 sigma it holds
+  98.0%, on the edge: the seal says "in 80% to 98%" and also "above 98% it is
+  too wide". 98.0 is not above 98, so that sentence reads the band as
+  inclusive, but the range itself does not say. Read inclusive, the 2 sigma
+  case is in the band; read exclusive, it is not. Claim 5 fails either way,
+  because of the 4 sigma case.
 - **`Since` is late for bends:** it lands a median of 12 samples after the true
   start of a bend, against a sealed bound of 3 (claim 9). For shifts the median
   error is 0.
