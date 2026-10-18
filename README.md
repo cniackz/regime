@@ -139,6 +139,30 @@ CUSUM (k = 1, true pre-change mean and sigma given), h = 3.406, C1 rate 0.437 / 
 - **Claim 9.** For bends, `Since` lands about 12 samples after the true start,
   because a bend with no jump becomes visible only as its effect accumulates.
 
+### Offline upper bound: PELT (not sealed)
+
+This comparison was added after both seals and was not part of the sealed
+prediction. PELT sees the whole series at once, so it bounds what any detector
+could find; `regime` is scored on `Since` at its first alarm. Reproduce with
+`REGIME_BANK=1 go test -run TestBankPELT -v .`.
+
+Offline upper bound, PELT (Killick, Fearnhead and Eckley 2012), penalty p*log(n) with sigma 1 known. Added after the seals: NOT part of the sealed prediction.
+
+| Case | Method | Change found within 5 samples of tau | Median abs error of the start | Spurious changes / 1000 samples |
+|---|---|---|---|---|
+| C1 no change | PELT, offline | n/a | n/a | 0.022 |
+| C1 no change | regime, online | n/a | n/a | 0.437 |
+| C2 shift 2 sigma | PELT, offline | 99.2% | 0.0 | 0.043 |
+| C2 shift 2 sigma | regime, online | 67.2% | 1.0 | 0.830 |
+| C3 shift 4 sigma | PELT, offline | 100.0% | 0.0 | 0.037 |
+| C3 shift 4 sigma | regime, online | 95.7% | 0.0 | 0.562 |
+| C4 bend 0.1 sigma/sample | PELT, offline | 37.4% | 7.0 | 0.012 |
+| C4 bend 0.1 sigma/sample | regime, online | 2.6% | 15.0 | 0.673 |
+| C6 shift 0.5 sigma | PELT, offline | 45.0% | 6.0 | 0.147 |
+| C6 shift 0.5 sigma | regime, online | 1.3% | 33.0 | 0.478 |
+
+regime counts as spurious any alarm other than the first one within the horizon after tau.
+
 ## Benchmarks
 
 `go test -bench .` on an Apple M5 Pro shared with other work, so the spread
@@ -159,6 +183,27 @@ fuzzing of `New` and `Observe`, examples, `-race`, and mutation testing with
 
 ## Known limits
 
+Measured on the bank (see "Measured results"):
+
+- **Gradual bends are detected weakly in this version.** Only 53.6% of bends of
+  0.1 sigma per sample are detected within 30 samples, against a sealed target
+  of 90% (claim 4). Offline PELT locates 37.4% of them within 5 samples, so the
+  case is hard, but `regime` trails it.
+- **Some 2 sigma shifts are missed:** 90.8% detected within 50 samples, against
+  a sealed 95% (claim 2). The median delay of those found, 3.0 samples, is
+  within the sealed bound of 6.9.
+- **The start interval is too wide for large jumps:** the 90% interval holds the
+  true start in 99.2% of 4 sigma shifts, above the sealed band of 80% to 98%
+  (claim 5). It is in the band at 2 sigma (97.8%) and for bends (93.1%).
+- **`Since` is late for bends:** it lands a median of 12 samples after the true
+  start of a bend, against a sealed bound of 3 (claim 9). For shifts the median
+  error is 0.
+- **The empirical prior has almost no effect on false alarms:** 0.437 against
+  0.442 per 1000 samples with the plain prior. The sealed hypothesis that it
+  would raise the rate (claim 7) was false.
+
+By design:
+
 - Noise is assumed independent. Autocorrelated noise raises the false-alarm
   rate.
 - Oscillation and seasonality are not a regime model. Remove the cycle first,
@@ -169,6 +214,13 @@ fuzzing of `New` and `Observe`, examples, `-race`, and mutation testing with
   probably started.
 - State does not persist across process restarts. `Clone` covers what-if runs;
   persistence is planned for v2.
+
+## v1 follow-ups
+
+- Tune how `Trend` and `Window` interact, so that a jump explained as an
+  earlier bend still raises `ChangeProb` ([#1](https://github.com/cniackz/regime/issues/1)).
+- Re-run the benchmarks on an idle machine, or report them with their variance.
+- Persistence across restarts (v2).
 
 ## License
 

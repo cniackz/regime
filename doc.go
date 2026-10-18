@@ -116,6 +116,9 @@
 //
 // # Limits
 //
+// Gradual bends are detected weakly in this version: on the synthetic bank
+// in the repository, about half of the bends of 0.1 noise scales per sample
+// are detected within 30 samples (the README has the measured limits).
 // The noise is assumed independent; autocorrelated noise raises the
 // false-alarm rate. Oscillation and seasonality are not a regime model:
 // remove the cycle upstream. A single large outlier can open a short run; the
