@@ -169,7 +169,8 @@ func newRun(model Model, startT, startU, center float64) run {
 func (r *run) predict(x [2]float64) (loc, scale2, nu float64) {
 	vx0 := r.v[0][0]*x[0] + r.v[0][1]*x[1]
 	vx1 := r.v[1][0]*x[0] + r.v[1][1]*x[1]
-	q := x[0]*vx0 + x[1]*vx1
+	// x'Vx >= 0 in exact arithmetic; clamp the rounding of a long regime.
+	q := max(x[0]*vx0+x[1]*vx1, 0)
 	loc = x[0]*r.m[0] + x[1]*r.m[1]
 	scale2 = r.beta / r.alpha * (1 + q)
 	nu = 2 * r.alpha
@@ -185,7 +186,7 @@ func (r *run) predict(x [2]float64) (loc, scale2, nu float64) {
 func (r *run) update(x [2]float64, y float64) {
 	vx0 := r.v[0][0]*x[0] + r.v[0][1]*x[1]
 	vx1 := r.v[1][0]*x[0] + r.v[1][1]*x[1]
-	s := 1 + x[0]*vx0 + x[1]*vx1
+	s := 1 + max(x[0]*vx0+x[1]*vx1, 0)
 	e := y - (x[0]*r.m[0] + x[1]*r.m[1])
 	k0, k1 := vx0/s, vx1/s
 	r.m[0] += k0 * e
@@ -194,13 +195,24 @@ func (r *run) update(x [2]float64, y float64) {
 	r.v[0][1] -= k0 * vx1
 	r.v[1][0] = r.v[0][1]
 	r.v[1][1] -= k1 * vx1
+	r.v[0][0] = max(r.v[0][0], 0)
+	r.v[1][1] = max(r.v[1][1], 0)
 	r.alpha += 0.5
 	r.beta += e * e / (2 * s)
 	r.n++
 }
 
+func allFinite(rs []run) bool {
+	for i := range rs {
+		if !rs[i].finite() {
+			return false
+		}
+	}
+	return true
+}
+
 func (r *run) finite() bool {
-	return isFinite(r.logp) && isFinite(r.m[0]) && isFinite(r.m[1]) &&
+	return isFinite(r.logp) && isFinite(r.p) && isFinite(r.m[0]) && isFinite(r.m[1]) &&
 		isFinite(r.v[0][0]) && isFinite(r.v[0][1]) && isFinite(r.v[1][1]) &&
 		isFinite(r.beta)
 }
@@ -503,12 +515,16 @@ func (d *Detector) step(t, v float64) (Report, error) {
 	nr.update(x0, y)
 	next = append(next, nr)
 
+	// Check before pruning too: a mass of -Inf or NaN would make prune drop
+	// every hypothesis.
+	if !allFinite(next) {
+		d.next = next[:0]
+		return Report{}, ErrRange
+	}
 	next = prune(next, d.cfg.maxRun)
-	for i := range next {
-		if !next[i].finite() {
-			d.next = next[:0]
-			return Report{}, ErrRange
-		}
+	if len(next) == 0 || !allFinite(next) {
+		d.next = next[:0]
+		return Report{}, ErrRange
 	}
 
 	d.runs, d.next = next, d.runs[:0]
